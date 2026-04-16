@@ -1,90 +1,111 @@
 // =====================================
-// CONFIG
+// 🔥 CONFIG (แก้แค่บรรทัดนี้)
 // =====================================
 const CONFIG = {
-  API_URL: "https://script.google.com/macros/s/AKfycbwtnfYjlEAloUtZt5cvblr_6hUAgaVx4hYzff86RmkjjDRgGFbIM_43jnJnFkIn4eq8eQ/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycbwtnfYjlEAloUtZt5cvblr_6hUAgaVx4hYzff86RmkjjDRgGFbIM_43jnJnFkIn4eq8eQ/exec", // 
   TARGET: 15,
-  REFRESH_INTERVAL: 30000, // 30 sec
-  DEBOUNCE: 300
+  REFRESH_INTERVAL: 30000 // refresh ทุก 30 วิ
 };
 
 // =====================================
-// GLOBAL STATE
+// STATE
 // =====================================
-const state = {
-  raw: [],
-  filtered: [],
+let state = {
+  data: [],
   summary: {},
   dept: {},
-  trend: [],
-  chartDept: null,
-  chartTrend: null,
-  lastHash: null
+  chart: null
 };
 
 // =====================================
-// UTIL
+// 🔥 SAFE FETCH (กัน error JSON พัง)
 // =====================================
-const utils = {
+async function fetchJSON(url) {
 
-  debounce(fn, delay) {
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), delay);
-    };
-  },
+  console.log("📡 Fetch:", url);
 
-  hash(data) {
-    return JSON.stringify(data).length;
-  },
+  try {
+    const res = await fetch(url);
 
-  percent(val) {
-    return Math.min((val / CONFIG.TARGET) * 100, 100);
-  },
+    const text = await res.text();
 
-  formatDate(d) {
-    if (!d) return "-";
-    return new Date(d).toLocaleDateString("th-TH");
+    // ❌ ถ้าเป็น HTML = ยิงผิด URL
+    if (text.startsWith("<!DOCTYPE")) {
+      throw new Error("❌ API ไม่ใช่ JSON → ตรวจสอบ URL GAS");
+    }
+
+    return JSON.parse(text);
+
+  } catch (err) {
+    console.error("❌ FETCH ERROR:", err);
+    throw err;
   }
-
-};
-
-// =====================================
-// API
-// =====================================
-const api = {
-
-  async dashboard() {
-    const r = await fetch(`${CONFIG.API_URL}?action=dashboard`);
-    return r.json();
-  },
-
-  async detail(name) {
-    const r = await fetch(`${CONFIG.API_URL}?action=detail&name=${encodeURIComponent(name)}`);
-    return r.json();
-  }
-
-};
-
-// =====================================
-// UI: SUMMARY
-// =====================================
-function renderSummary() {
-  total.innerText = state.summary.total || 0;
-  pass.innerText = state.summary.pass || 0;
-  fail.innerText = state.summary.fail || 0;
 }
 
 // =====================================
-// UI: TABLE
+// LOAD DASHBOARD
+// =====================================
+async function loadDashboard() {
+
+  try {
+    showLoading(true);
+
+    const url = CONFIG.API_URL + "?action=dashboard";
+
+    const res = await fetchJSON(url);
+
+    state.data = res.data || [];
+    state.summary = res.summary || {};
+    state.dept = res.dept || {};
+
+    renderAll();
+
+  } catch (err) {
+
+    console.error("❌ LOAD ERROR:", err.message);
+
+    alert("โหลดข้อมูลไม่ได้\n\n" + err.message);
+
+  } finally {
+    showLoading(false);
+  }
+}
+
+// =====================================
+// RENDER ALL
+// =====================================
+function renderAll() {
+  renderSummary();
+  renderTable(state.data);
+  renderChart();
+}
+
+// =====================================
+// SUMMARY
+// =====================================
+function renderSummary() {
+  document.getElementById("total").innerText = state.summary.total || 0;
+  document.getElementById("pass").innerText = state.summary.pass || 0;
+  document.getElementById("fail").innerText = state.summary.fail || 0;
+}
+
+// =====================================
+// TABLE
 // =====================================
 function renderTable(data) {
+
+  const table = document.getElementById("table");
+
+  if (!data.length) {
+    table.innerHTML = "<tr><td colspan='4'>ไม่มีข้อมูล</td></tr>";
+    return;
+  }
+
   let html = "";
 
   data.forEach(d => {
 
-    const percent = utils.percent(d.hours);
+    const percent = Math.min((d.hours / CONFIG.TARGET) * 100, 100);
 
     html += `
     <tr onclick="openDetail('${d.name}')">
@@ -94,206 +115,149 @@ function renderTable(data) {
         <div class="progress">
           <div class="progress-bar" style="width:${percent}%"></div>
         </div>
-        <small>${d.hours}/${CONFIG.TARGET}</small>
+        ${d.hours}/${CONFIG.TARGET}
       </td>
-      <td class="${d.status === 'ผ่าน' ? 'pass' : 'fail'}">
+      <td style="color:${d.status === 'ผ่าน' ? '#059669' : '#dc2626'};font-weight:600;">
         ${d.status}
       </td>
-    </tr>
-    `;
+    </tr>`;
   });
 
   table.innerHTML = html;
 }
 
 // =====================================
-// UI: DEPARTMENT CHART
+// CHART
 // =====================================
-function renderDeptChart() {
+function renderChart() {
 
   const labels = Object.keys(state.dept);
   const values = Object.values(state.dept);
 
-  if (state.chartDept) {
-    state.chartDept.data.labels = labels;
-    state.chartDept.data.datasets[0].data = values;
-    state.chartDept.update();
+  const ctx = document.getElementById("chart");
+
+  if (state.chart) {
+    state.chart.data.labels = labels;
+    state.chart.data.datasets[0].data = values;
+    state.chart.update();
     return;
   }
 
-  state.chartDept = new Chart(chart, {
+  state.chart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels,
+      labels: labels,
       datasets: [{
         label: 'ชั่วโมงรวม',
         data: values
       }]
     },
-    options: { responsive: true }
-  });
-}
-
-// =====================================
-// 📊 KPI TREND CHART
-// =====================================
-function renderTrendChart() {
-
-  const labels = state.trend.map(x => x.date);
-  const pass = state.trend.map(x => x.pass);
-
-  if (state.chartTrend) {
-    state.chartTrend.data.labels = labels;
-    state.chartTrend.data.datasets[0].data = pass;
-    state.chartTrend.update();
-    return;
-  }
-
-  state.chartTrend = new Chart(trendChart, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'จำนวนคนผ่าน',
-        data: pass
-      }]
+    options: {
+      responsive: true
     }
   });
 }
 
 // =====================================
-// 📱 MOBILE UX
-// =====================================
-function initMobileUX() {
-
-  // swipe close modal
-  let startY = 0;
-
-  modal.addEventListener("touchstart", e => {
-    startY = e.touches[0].clientY;
-  });
-
-  modal.addEventListener("touchend", e => {
-    let endY = e.changedTouches[0].clientY;
-    if (endY - startY > 100) {
-      closeModal();
-    }
-  });
-
-}
-
-// =====================================
-// 🔍 SEARCH
-// =====================================
-const handleSearch = utils.debounce((val) => {
-
-  val = val.toLowerCase();
-
-  state.filtered = state.raw.filter(d =>
-    d.name.toLowerCase().includes(val)
-  );
-
-  renderTable(state.filtered);
-
-}, CONFIG.DEBOUNCE);
-
-// =====================================
-// 📄 DETAIL
+// DETAIL MODAL
 // =====================================
 async function openDetail(name) {
 
+  const modal = document.getElementById("modal");
+  const modalName = document.getElementById("modalName");
+  const modalTable = document.getElementById("modalTable");
+
   modal.style.display = "block";
   modalName.innerText = name;
-  modalTable.innerHTML = "Loading...";
-
-  const data = await api.detail(name);
-
-  let html = "";
-
-  data.forEach(d => {
-    html += `
-    <tr>
-      <td>${d.course}</td>
-      <td>${d.hours}</td>
-      <td>${utils.formatDate(d.date)}</td>
-    </tr>
-    `;
-  });
-
-  modalTable.innerHTML = html;
-}
-
-function closeModal() {
-  modal.style.display = "none";
-}
-
-// =====================================
-// ⚡ REALTIME UPDATE (SMART)
-// =====================================
-async function refreshData() {
+  modalTable.innerHTML = "<tr><td colspan='3'>กำลังโหลด...</td></tr>";
 
   try {
 
-    const res = await api.dashboard();
-    const newHash = utils.hash(res);
+    const url = CONFIG.API_URL + "?action=detail&name=" + encodeURIComponent(name);
 
-    if (newHash === state.lastHash) {
-      console.log("no change");
+    const data = await fetchJSON(url);
+
+    if (!data.length) {
+      modalTable.innerHTML = "<tr><td colspan='3'>ไม่มีข้อมูล</td></tr>";
       return;
     }
 
-    console.log("update!");
+    let html = "";
 
-    state.lastHash = newHash;
-
-    state.raw = res.data;
-    state.filtered = res.data;
-    state.summary = res.summary;
-    state.dept = res.dept;
-
-    // mock trend (สามารถต่อ backend จริงได้)
-    state.trend.push({
-      date: new Date().toLocaleTimeString(),
-      pass: res.summary.pass
+    data.forEach(d => {
+      html += `
+      <tr>
+        <td>${d.course}</td>
+        <td>${d.hours}</td>
+        <td>${d.date || "-"}</td>
+      </tr>`;
     });
 
-    renderSummary();
-    renderTable(state.filtered);
-    renderDeptChart();
-    renderTrendChart();
+    modalTable.innerHTML = html;
 
-  } catch (e) {
-    console.error("refresh error", e);
+  } catch (err) {
+    modalTable.innerHTML = "<tr><td colspan='3'>โหลดไม่ได้</td></tr>";
   }
 }
 
 // =====================================
-// INIT
+// CLOSE MODAL
 // =====================================
-function bindEvents() {
+function closeModal() {
+  document.getElementById("modal").style.display = "none";
+}
 
-  search.addEventListener("input", e => {
-    handleSearch(e.target.value);
+// =====================================
+// LOADING UI
+// =====================================
+function showLoading(show) {
+  const loader = document.getElementById("loader");
+  if (!loader) return;
+
+  loader.style.display = show ? "flex" : "none";
+}
+
+// =====================================
+// REALTIME AUTO REFRESH
+// =====================================
+function startRealtime() {
+
+  setInterval(() => {
+    console.log("🔄 refresh...");
+    loadDashboard();
+  }, CONFIG.REFRESH_INTERVAL);
+}
+
+// =====================================
+// SEARCH
+// =====================================
+function initSearch() {
+
+  const search = document.getElementById("search");
+
+  if (!search) return;
+
+  search.addEventListener("input", function () {
+
+    const keyword = this.value.toLowerCase();
+
+    const filtered = state.data.filter(d =>
+      d.name.toLowerCase().includes(keyword)
+    );
+
+    renderTable(filtered);
   });
-
-  window.addEventListener("click", e => {
-    if (e.target === modal) closeModal();
-  });
-
 }
 
 // =====================================
 // START
 // =====================================
-async function init() {
+document.addEventListener("DOMContentLoaded", () => {
 
-  bindEvents();
-  initMobileUX();
+  console.log("🚀 App Start");
 
-  await refreshData();
+  initSearch();
+  loadDashboard();
+  startRealtime();
 
-  // realtime loop
-  setInterval(refreshData, CONFIG.REFRESH_INTERVAL);
-}
-
-document.addEventListener("DOMContentLoaded", init);
+});
