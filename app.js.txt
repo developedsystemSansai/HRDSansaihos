@@ -1,0 +1,299 @@
+// =====================================
+// CONFIG
+// =====================================
+const CONFIG = {
+  API_URL: "YOUR_WEB_APP_URL",
+  TARGET: 15,
+  REFRESH_INTERVAL: 30000, // 30 sec
+  DEBOUNCE: 300
+};
+
+// =====================================
+// GLOBAL STATE
+// =====================================
+const state = {
+  raw: [],
+  filtered: [],
+  summary: {},
+  dept: {},
+  trend: [],
+  chartDept: null,
+  chartTrend: null,
+  lastHash: null
+};
+
+// =====================================
+// UTIL
+// =====================================
+const utils = {
+
+  debounce(fn, delay) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), delay);
+    };
+  },
+
+  hash(data) {
+    return JSON.stringify(data).length;
+  },
+
+  percent(val) {
+    return Math.min((val / CONFIG.TARGET) * 100, 100);
+  },
+
+  formatDate(d) {
+    if (!d) return "-";
+    return new Date(d).toLocaleDateString("th-TH");
+  }
+
+};
+
+// =====================================
+// API
+// =====================================
+const api = {
+
+  async dashboard() {
+    const r = await fetch(`${CONFIG.API_URL}?action=dashboard`);
+    return r.json();
+  },
+
+  async detail(name) {
+    const r = await fetch(`${CONFIG.API_URL}?action=detail&name=${encodeURIComponent(name)}`);
+    return r.json();
+  }
+
+};
+
+// =====================================
+// UI: SUMMARY
+// =====================================
+function renderSummary() {
+  total.innerText = state.summary.total || 0;
+  pass.innerText = state.summary.pass || 0;
+  fail.innerText = state.summary.fail || 0;
+}
+
+// =====================================
+// UI: TABLE
+// =====================================
+function renderTable(data) {
+  let html = "";
+
+  data.forEach(d => {
+
+    const percent = utils.percent(d.hours);
+
+    html += `
+    <tr onclick="openDetail('${d.name}')">
+      <td>${d.name}</td>
+      <td>${d.dept}</td>
+      <td>
+        <div class="progress">
+          <div class="progress-bar" style="width:${percent}%"></div>
+        </div>
+        <small>${d.hours}/${CONFIG.TARGET}</small>
+      </td>
+      <td class="${d.status === 'ผ่าน' ? 'pass' : 'fail'}">
+        ${d.status}
+      </td>
+    </tr>
+    `;
+  });
+
+  table.innerHTML = html;
+}
+
+// =====================================
+// UI: DEPARTMENT CHART
+// =====================================
+function renderDeptChart() {
+
+  const labels = Object.keys(state.dept);
+  const values = Object.values(state.dept);
+
+  if (state.chartDept) {
+    state.chartDept.data.labels = labels;
+    state.chartDept.data.datasets[0].data = values;
+    state.chartDept.update();
+    return;
+  }
+
+  state.chartDept = new Chart(chart, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'ชั่วโมงรวม',
+        data: values
+      }]
+    },
+    options: { responsive: true }
+  });
+}
+
+// =====================================
+// 📊 KPI TREND CHART
+// =====================================
+function renderTrendChart() {
+
+  const labels = state.trend.map(x => x.date);
+  const pass = state.trend.map(x => x.pass);
+
+  if (state.chartTrend) {
+    state.chartTrend.data.labels = labels;
+    state.chartTrend.data.datasets[0].data = pass;
+    state.chartTrend.update();
+    return;
+  }
+
+  state.chartTrend = new Chart(trendChart, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'จำนวนคนผ่าน',
+        data: pass
+      }]
+    }
+  });
+}
+
+// =====================================
+// 📱 MOBILE UX
+// =====================================
+function initMobileUX() {
+
+  // swipe close modal
+  let startY = 0;
+
+  modal.addEventListener("touchstart", e => {
+    startY = e.touches[0].clientY;
+  });
+
+  modal.addEventListener("touchend", e => {
+    let endY = e.changedTouches[0].clientY;
+    if (endY - startY > 100) {
+      closeModal();
+    }
+  });
+
+}
+
+// =====================================
+// 🔍 SEARCH
+// =====================================
+const handleSearch = utils.debounce((val) => {
+
+  val = val.toLowerCase();
+
+  state.filtered = state.raw.filter(d =>
+    d.name.toLowerCase().includes(val)
+  );
+
+  renderTable(state.filtered);
+
+}, CONFIG.DEBOUNCE);
+
+// =====================================
+// 📄 DETAIL
+// =====================================
+async function openDetail(name) {
+
+  modal.style.display = "block";
+  modalName.innerText = name;
+  modalTable.innerHTML = "Loading...";
+
+  const data = await api.detail(name);
+
+  let html = "";
+
+  data.forEach(d => {
+    html += `
+    <tr>
+      <td>${d.course}</td>
+      <td>${d.hours}</td>
+      <td>${utils.formatDate(d.date)}</td>
+    </tr>
+    `;
+  });
+
+  modalTable.innerHTML = html;
+}
+
+function closeModal() {
+  modal.style.display = "none";
+}
+
+// =====================================
+// ⚡ REALTIME UPDATE (SMART)
+// =====================================
+async function refreshData() {
+
+  try {
+
+    const res = await api.dashboard();
+    const newHash = utils.hash(res);
+
+    if (newHash === state.lastHash) {
+      console.log("no change");
+      return;
+    }
+
+    console.log("update!");
+
+    state.lastHash = newHash;
+
+    state.raw = res.data;
+    state.filtered = res.data;
+    state.summary = res.summary;
+    state.dept = res.dept;
+
+    // mock trend (สามารถต่อ backend จริงได้)
+    state.trend.push({
+      date: new Date().toLocaleTimeString(),
+      pass: res.summary.pass
+    });
+
+    renderSummary();
+    renderTable(state.filtered);
+    renderDeptChart();
+    renderTrendChart();
+
+  } catch (e) {
+    console.error("refresh error", e);
+  }
+}
+
+// =====================================
+// INIT
+// =====================================
+function bindEvents() {
+
+  search.addEventListener("input", e => {
+    handleSearch(e.target.value);
+  });
+
+  window.addEventListener("click", e => {
+    if (e.target === modal) closeModal();
+  });
+
+}
+
+// =====================================
+// START
+// =====================================
+async function init() {
+
+  bindEvents();
+  initMobileUX();
+
+  await refreshData();
+
+  // realtime loop
+  setInterval(refreshData, CONFIG.REFRESH_INTERVAL);
+}
+
+document.addEventListener("DOMContentLoaded", init);
