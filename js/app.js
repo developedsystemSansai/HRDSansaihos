@@ -110,6 +110,27 @@ function renderTable(data) {
 
   table.innerHTML = html;
 }
+function initSearch() {
+
+  const search = document.getElementById("search");
+
+  // 🔥 เช็คก่อนใช้
+  if (!search) {
+    console.warn("❌ ไม่พบ search element");
+    return;
+  }
+
+  search.addEventListener("input", function () {
+
+    const keyword = this.value.toLowerCase();
+
+    const filtered = state.data.filter(d =>
+      d.name.toLowerCase().includes(keyword)
+    );
+
+    renderTable(filtered);
+  });
+}
 
 // =====================================
 // CHART
