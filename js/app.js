@@ -2,7 +2,7 @@
 // CONFIG
 // =====================================
 const CONFIG = {
-  API_URL: "YOUR_WEB_APP_URL",
+  API_URL: "https://script.google.com/macros/s/AKfycbwtnfYjlEAloUtZt5cvblr_6hUAgaVx4hYzff86RmkjjDRgGFbIM_43jnJnFkIn4eq8eQ/exec",
   TARGET: 15,
   REFRESH_INTERVAL: 30000, // 30 sec
   DEBOUNCE: 300
